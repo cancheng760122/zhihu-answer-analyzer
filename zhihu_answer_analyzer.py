@@ -32,7 +32,34 @@ HEADERS = {
     "Referer": "https://www.zhihu.com",
     "Accept": "application/json, text/plain, */*",
     "x-requested-with": "fetch",
+    "x-zse-93": "101_3_3.0",
 }
+
+# 全局Cookie和d_c0
+ZHIHU_COOKIE = ""
+ZHIHU_DC0 = ""
+
+
+def set_zhihu_cookie(cookie):
+    """设置知乎Cookie并提取d_c0"""
+    global ZHIHU_COOKIE, ZHIHU_DC0
+    ZHIHU_COOKIE = cookie
+    HEADERS["Cookie"] = cookie
+    # 提取d_c0
+    import re
+    match = re.search(r'd_c0=([^;]+)', cookie)
+    if match:
+        ZHIHU_DC0 = match.group(1)
+
+
+def sign_zhihu_request(url_path, body=""):
+    """生成知乎x-zse-96签名"""
+    import hashlib
+    x_zse_93 = "101_3_3.0"
+    # 签名公式: MD5(x-zse-93 + 路径 + body + d_c0)
+    raw = f"{x_zse_93}{url_path}{body}{ZHIHU_DC0}"
+    md5 = hashlib.md5(raw.encode()).hexdigest()
+    return f"{x_zse_93}+{md5}"
 
 # 停用词
 STOP_WORDS = {
@@ -138,10 +165,23 @@ def print_progress(current, total, prefix=""):
 
 
 def safe_get(url, params=None, cookies=None, retries=3, delay=2):
-    """带重试的GET请求"""
+    """带重试的GET请求，自动加x-zse-96签名"""
+    from urllib.parse import urlparse
+    # 提取URL路径用于签名
+    parsed = urlparse(url)
+    url_path = parsed.path
+    if params:
+        from urllib.parse import urlencode
+        url_path = f"{url_path}?{urlencode(params)}"
+    
+    # 生成签名
+    headers = dict(HEADERS)
+    if ZHIHU_DC0:
+        headers["x-zse-96"] = sign_zhihu_request(url_path)
+    
     for i in range(retries):
         try:
-            resp = requests.get(url, params=params, headers=HEADERS,
+            resp = requests.get(url, params=params, headers=headers,
                                 cookies=cookies, timeout=15)
             if resp.status_code == 401:
                 print("\n❌ 401未授权，请检查Cookie是否正确")
@@ -1030,6 +1070,15 @@ def main():
         print("   获取方法：浏览器登录知乎 → F12 → Application → Cookies → 复制 z_c0 的值")
         print("   使用方式：python zhihu_answer_analyzer.py 问题ID --cookie \"你的z_c0值\"")
         print()
+    
+    # 设置完整Cookie用于x-zse-96签名
+    full_cookie = args.cookie or ""
+    if not full_cookie and args.cookie_file and os.path.exists(args.cookie_file):
+        with open(args.cookie_file, "r", encoding="utf-8") as f:
+            full_cookie = f.read().strip()
+    if full_cookie:
+        set_zhihu_cookie(full_cookie)
+        print("✅ Cookie已设置（含x-zse-96签名）")
 
     # 1. 获取问题信息
     print("\n📋 获取问题信息...")
