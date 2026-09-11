@@ -1,0 +1,29 @@
+# 生成的报告
+zhihu_report_*.html
+zhihu_report_*.csv
+test_report.html
+
+# Cookie文件（不要提交！）
+cookie.txt
+*.cookie
+cookies.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
