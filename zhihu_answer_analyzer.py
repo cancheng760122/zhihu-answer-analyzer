@@ -1116,7 +1116,10 @@ def main():
     analysis = analyze_answers(answers)
 
     # 6. 生成报告
-    output_path = args.output or f"zhihu_report_{qid}.html"
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    task_dir = f"output/{date_str}_question_{qid}"
+    os.makedirs(task_dir, exist_ok=True)
+    output_path = args.output or f"{task_dir}/report.html"
     print(f"\n📝 生成HTML报告...")
     generate_html_report(question_info, answers, analysis, output_path)
 
