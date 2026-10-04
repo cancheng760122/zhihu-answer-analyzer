@@ -39,6 +39,236 @@ HEADERS = {
 ZHIHU_COOKIE = ""
 ZHIHU_DC0 = ""
 
+# DeepSeek API配置
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-chat"
+
+
+def deepseek_summary(api_key, question_info, answers, max_answers=50, max_chars_per_answer=800):
+    """调用DeepSeek API生成深度总结"""
+    if not api_key:
+        return None
+
+    print("\n🤖 调用DeepSeek生成深度总结...")
+    print(f"   输入：TOP{max_answers}精华回答，每个截取{max_chars_per_answer}字")
+
+    # 准备回答内容（取精华评分最高的N个回答）
+    sorted_answers = sorted(answers, key=lambda x: x.get("quality_score", {}).get("total", 0), reverse=True)
+    top_answers = sorted_answers[:max_answers]
+
+    answers_text = ""
+    for i, ans in enumerate(top_answers, 1):
+        content = ans.get("content", "")[:max_chars_per_answer]
+        author = ans.get("author", "匿名")
+        votes = ans.get("voteup_count", 0)
+        comments = ans.get("comment_count", 0)
+        answers_text += f"\n【回答{i}】作者：{author} | 赞同：{votes} | 评论：{comments}\n{content}\n"
+
+    prompt = f"""你是一个专业的知乎内容分析专家，也是一个高效的知识筛选助手。你的任务是分析以下知乎问题下的所有回答，帮用户筛选干货、提炼精华，让用户不用逐条阅读就能高效吸收最有价值的内容。
+
+【问题标题】{question_info.get('title', '')}
+
+【问题描述】{question_info.get('detail', '')[:500]}
+
+【精华回答（共{len(top_answers)}条，按质量评分排序）】{answers_text}
+
+请按以下格式生成一份全面、详细的深度总结（用中文，分点清晰，重点突出）：
+
+## 一、问题背景与核心议题
+（这个问题在讨论什么？为什么会有这个问题？核心议题是什么？用2-3段话说明）
+
+## 二、主流观点全景图
+（把所有回答的观点分成3-5个主要流派/立场，每个流派说明：核心主张、代表回答、支持人数、主要论据。让用户一眼看清整体格局）
+
+## 三、高赞回答精华摘要
+（对点赞最高的5-8个回答，每个用3-5句话详细总结核心内容、关键论据、独特观点。注明作者和赞同数）
+
+## 四、实用干货提取
+（从所有回答中提取最有价值的实用信息，分类整理：
+- 📌 具体方法/步骤/技巧
+- 💡 经验教训/避坑指南
+- 📚 推荐资源/工具/书籍/链接
+- ⚠️ 注意事项/风险提示
+每条干货注明来自哪个回答）
+
+## 五、金句与亮点摘录
+（摘录5-10条最精彩、最有启发性的原文句子，注明作者和赞同数）
+
+## 六、争议焦点与多方辩论
+（列出2-3个争议最大的话题，分别说明正方观点、反方观点、中立观点，以及各自的核心论据）
+
+## 七、反方/小众观点
+（那些赞同数不高但很有启发性的反常识观点、小众视角，不要遗漏）
+
+## 八、阅读优先级推荐
+（如果用户时间有限，推荐优先看哪3-5个回答？为什么？哪些回答可以跳过？）
+
+## 九、知识体系梳理
+（把这个问题涉及的核心概念、逻辑关系、因果链条梳理清楚，帮用户建立系统认知）
+
+## 十、最终结论与行动建议
+（这个问题的共识是什么？还有哪些没有定论？给读者的具体建议是什么？如果要实践，第一步该做什么？）
+
+要求：
+1. 客观中立，不偏不倚，基于提供的回答内容，不要编造
+2. 重点突出干货和实用信息，避免空泛的套话
+3. 语言精炼但信息密度高，让用户花最少时间获取最多价值
+4. 总字数控制在2000-3000字
+5. 重要信息用加粗标注
+6. 每个观点尽量注明来源（回答编号或作者）"""
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": DEEPSEEK_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 4000
+        }
+
+        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=data, timeout=180)
+        resp.raise_for_status()
+        result = resp.json()
+
+        summary = result["choices"][0]["message"]["content"]
+        print(f"✅ 深度总结生成完成（约{len(summary)}字）")
+        return summary
+
+    except Exception as e:
+        print(f"⚠️  DeepSeek API调用失败: {e}")
+        return None
+
+
+def load_knowledge(books=None, perspective=None):
+    """加载知识库文件（书籍核心观点+名人视角）"""
+    knowledge_text = ""
+
+    # 加载书籍
+    if books:
+        book_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge", "books")
+        for book_name in books:
+            book_file = os.path.join(book_dir, f"{book_name}_核心观点.md")
+            if os.path.exists(book_file):
+                with open(book_file, "r", encoding="utf-8") as f:
+                    knowledge_text += f"\n\n========== 书籍：{book_name} ==========\n"
+                    knowledge_text += f.read()
+                print(f"📚 已加载书籍：{book_name}")
+            else:
+                print(f"⚠️  未找到书籍：{book_name}")
+
+    # 加载名人视角
+    if perspective:
+        persp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge", "perspectives")
+        persp_file = os.path.join(persp_dir, f"{perspective}_思维框架.md")
+        if os.path.exists(persp_file):
+            with open(persp_file, "r", encoding="utf-8") as f:
+                knowledge_text += f"\n\n========== 视角：{perspective} ==========\n"
+                knowledge_text += f.read()
+            print(f"🎯 已加载视角：{perspective}")
+        else:
+            print(f"⚠️  未找到视角：{perspective}")
+
+    return knowledge_text
+
+
+def multi_source_analysis(api_key, question_info, answers, knowledge_text, perspective=None):
+    """多源知识融合分析：知乎回答 + 书籍 + 名人视角"""
+    if not api_key or not knowledge_text:
+        return None
+
+    print(f"\n🧠 多源融合分析中（视角：{perspective or '无'}）...")
+
+    # 准备回答内容
+    sorted_answers = sorted(answers, key=lambda x: x.get("quality_score", {}).get("total", 0), reverse=True)
+    top_answers = sorted_answers[:30]
+
+    answers_text = ""
+    for i, ans in enumerate(top_answers, 1):
+        content = ans.get("content", "")[:600]
+        author = ans.get("author", "匿名")
+        votes = ans.get("voteup_count", 0)
+        answers_text += f"\n【回答{i}】作者：{author} | 赞同：{votes}\n{content}\n"
+
+    persp_text = f"用{perspective}的思维框架和表达方式来点评" if perspective else "客观中立地"
+
+    prompt = f"""你是一个顶级的内容分析专家，擅长从多个信息源中提炼精华、辨析真伪、给出高维洞察。
+
+请分析以下知乎问题下的回答，并结合提供的书籍知识和名人视角，生成一份多源融合的深度分析报告。
+
+【问题标题】{question_info.get('title', '')}
+
+【知乎精华回答】{answers_text}
+
+【参考知识库】{knowledge_text}
+
+请按以下格式生成分析报告（用中文，分点清晰，重点突出）：
+
+## 一、三方对照分析
+将知乎回答、书籍观点、{perspective or '通用'}视角三者进行对照：
+- 共识点：哪些观点是三方都认同的？
+- 矛盾点：哪些观点之间存在冲突？谁更有道理？
+- 互补点：书籍和视角补充了哪些知乎回答没有提到的内容？
+
+## 二、{perspective or '专家'}视角深度点评
+{persp_text}这些回答：
+- 哪些回答说到了点子上？为什么？
+- 哪些回答是正确的废话？看似有道理实则没用？
+- 哪些回答有误导性？可能会害了读者？
+- 从更高维的视角看，这个问题的本质是什么？
+
+## 三、精华回答分级
+将回答分为三个等级：
+- ⭐⭐⭐ 真干货：有具体方法、数据、可操作建议的回答（列出3-5个，说明为什么好）
+- ⭐⭐ 有启发：有一定观点但不够深入的回答（列出3-5个）
+- ⭐ 鸡汤/误导：看似正能量实则没用，甚至有误导性的回答（列出2-3个，说明为什么不好）
+
+## 四、书籍知识印证
+- 书中的哪些观点被知乎回答印证了？
+- 书中的哪些建议在知乎回答中被反复验证？
+- 有没有知乎回答提到了书里没有的新视角？
+
+## 五、认知升级总结
+综合所有信息源，给出比任何单一来源都更高维的结论：
+- 这个问题的底层逻辑是什么？
+- 普通人最应该记住的3-5条核心建议是什么？
+- 有哪些常见的误区需要避免？
+- 如果只能做一件事，应该做什么？
+
+要求：
+1. 基于提供的所有信息，不要编造
+2. 敢于直言，不怕得罪人，明确指出哪些回答是垃圾
+3. 重点突出可操作的建议，不要空泛的道理
+4. 每个判断尽量说明理由和依据
+5. 总字数控制在2000-3000字
+6. 重要信息用加粗标注"""
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": DEEPSEEK_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 4000
+        }
+
+        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=data, timeout=180)
+        resp.raise_for_status()
+        result = resp.json()
+
+        analysis = result["choices"][0]["message"]["content"]
+        print(f"✅ 多源融合分析完成（约{len(analysis)}字）")
+        return analysis
+
+    except Exception as e:
+        print(f"⚠️  多源融合分析失败: {e}")
+        return None
+
 
 def set_zhihu_cookie(cookie):
     """设置知乎Cookie并提取d_c0"""
@@ -559,7 +789,91 @@ def analyze_answers(answers):
 # HTML报告生成
 # ============================================================
 
-def generate_html_report(question_info, answers, analysis, output_path):
+def markdown_to_html(text):
+    """简单的Markdown转HTML，处理标题、加粗、列表、段落"""
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    html_lines = []
+    in_list = False
+    in_ol = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # 空行：结束列表
+        if not stripped:
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+            if in_ol:
+                html_lines.append("</ol>")
+                in_ol = False
+            continue
+
+        # 标题
+        if stripped.startswith("#### "):
+            if in_list: html_lines.append("</ul>"); in_list = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h5>{stripped[5:]}</h5>")
+            continue
+        if stripped.startswith("### "):
+            if in_list: html_lines.append("</ul>"); in_list = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h4>{stripped[4:]}</h4>")
+            continue
+        if stripped.startswith("## "):
+            if in_list: html_lines.append("</ul>"); in_list = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h4>{stripped[3:]}</h4>")
+            continue
+        if stripped.startswith("# "):
+            if in_list: html_lines.append("</ul>"); in_list = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h3>{stripped[2:]}</h3>")
+            continue
+
+        # 无序列表
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            if not in_list:
+                if in_ol: html_lines.append("</ol>"); in_ol = False
+                html_lines.append("<ul>")
+                in_list = True
+            content = stripped[2:]
+            # 处理加粗
+            import re
+            content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', content)
+            html_lines.append(f"<li>{content}</li>")
+            continue
+
+        # 有序列表
+        import re
+        ol_match = re.match(r'^(\d+)\.\s+(.+)$', stripped)
+        if ol_match:
+            if not in_ol:
+                if in_list: html_lines.append("</ul>"); in_list = False
+                html_lines.append("<ol>")
+                in_ol = True
+            content = ol_match.group(2)
+            content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', content)
+            html_lines.append(f"<li>{content}</li>")
+            continue
+
+        # 普通段落：处理加粗
+        if in_list: html_lines.append("</ul>"); in_list = False
+        if in_ol: html_lines.append("</ol>"); in_ol = False
+        content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', stripped)
+        html_lines.append(f"<p>{content}</p>")
+
+    # 结束未闭合的列表
+    if in_list: html_lines.append("</ul>")
+    if in_ol: html_lines.append("</ol>")
+
+    return "\n".join(html_lines)
+
+
+def generate_html_report(question_info, answers, analysis, output_path, ai_summary=None, multi_analysis=None):
     """生成HTML分析报告"""
 
     # 精华回答（按评分排序，取前10）
@@ -642,46 +956,48 @@ def generate_html_report(question_info, answers, analysis, output_path):
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
             background: #f0f2f5;
             color: #333;
+            font-size: 15px;
+            line-height: 1.7;
         }}
         .header {{
             background: linear-gradient(135deg, #0066ff 0%, #0084ff 50%, #00a6ff 100%);
             color: white;
-            padding: 30px 40px;
+            padding: 36px 48px;
         }}
-        .header h1 {{ font-size: 24px; margin-bottom: 12px; line-height: 1.4; }}
-        .question-meta {{ display: flex; gap: 24px; flex-wrap: wrap; font-size: 14px; opacity: 0.95; }}
-        .container {{ max-width: 1400px; margin: 0 auto; padding: 24px; }}
+        .header h1 {{ font-size: 28px; margin-bottom: 16px; line-height: 1.4; }}
+        .question-meta {{ display: flex; gap: 24px; flex-wrap: wrap; font-size: 15px; opacity: 0.95; }}
+        .container {{ max-width: 100%; margin: 0 auto; padding: 20px 32px; }}
         .stats-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 16px;
             margin-bottom: 24px;
         }}
         .stat-card {{
             background: white;
-            border-radius: 10px;
-            padding: 18px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             text-align: center;
         }}
-        .stat-card .label {{ font-size: 13px; color: #999; margin-bottom: 6px; }}
-        .stat-card .value {{ font-size: 24px; font-weight: 600; color: #0066ff; }}
-        .stat-card .sub {{ font-size: 12px; color: #bbb; margin-top: 4px; }}
+        .stat-card .label {{ font-size: 15px; color: #999; margin-bottom: 10px; }}
+        .stat-card .value {{ font-size: 34px; font-weight: 700; color: #0066ff; }}
+        .stat-card .sub {{ font-size: 14px; color: #bbb; margin-top: 8px; }}
         .tabs {{
             display: flex;
-            gap: 4px;
+            gap: 6px;
             background: white;
-            padding: 8px;
-            border-radius: 10px;
-            margin-bottom: 16px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            padding: 10px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             flex-wrap: wrap;
         }}
         .tab {{
-            padding: 10px 20px;
+            padding: 12px 24px;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 15px;
             transition: all 0.2s;
             color: #666;
         }}
@@ -691,16 +1007,17 @@ def generate_html_report(question_info, answers, analysis, output_path):
             background: white;
             border-radius: 12px;
             padding: 24px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 28px;
         }}
         .chart-container h3 {{
-            font-size: 16px;
-            margin-bottom: 16px;
-            padding-left: 10px;
-            border-left: 3px solid #0066ff;
+            font-size: 19px;
+            margin-bottom: 20px;
+            padding-left: 12px;
+            border-left: 4px solid #0066ff;
         }}
-        .chart {{ width: 100%; height: 400px; }}
+        .chart {{ width: 100%; height: 700px; font-size: 14px; line-height: 1.5; }}
+        .chart canvas, .chart svg {{ display: block; }}
         .hidden {{ display: none; }}
         .answer-card {{
             display: flex;
@@ -729,23 +1046,23 @@ def generate_html_report(question_info, answers, analysis, output_path):
             margin-bottom: 8px;
             flex-wrap: wrap;
         }}
-        .answer-author {{ color: #0066ff; font-weight: 600; font-size: 15px; }}
-        .answer-headline {{ color: #999; font-size: 13px; }}
+        .answer-author {{ color: #0066ff; font-weight: 600; font-size: 16px; }}
+        .answer-headline {{ color: #999; font-size: 14px; }}
         .answer-score {{
             margin-left: auto;
             background: linear-gradient(135deg, #ff6b6b, #ffa502);
             color: white;
-            padding: 4px 12px;
+            padding: 5px 14px;
             border-radius: 12px;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
         }}
         .answer-meta {{
             display: flex;
             gap: 16px;
-            font-size: 13px;
+            font-size: 14px;
             color: #888;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             flex-wrap: wrap;
         }}
         .answer-score-bar {{
@@ -762,12 +1079,12 @@ def generate_html_report(question_info, answers, analysis, output_path):
             font-size: 11px;
         }}
         .answer-content {{
-            font-size: 14px;
-            line-height: 1.8;
+            font-size: 15px;
+            line-height: 1.9;
             color: #444;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
             display: -webkit-box;
-            -webkit-line-clamp: 6;
+            -webkit-line-clamp: 8;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }}
@@ -821,6 +1138,38 @@ def generate_html_report(question_info, answers, analysis, output_path):
         .insight-box h4 {{ font-size: 15px; margin-bottom: 12px; color: #0066ff; }}
         .insight-box ul {{ padding-left: 20px; }}
         .insight-box li {{ margin-bottom: 8px; font-size: 14px; line-height: 1.6; }}
+        .ai-summary {{
+            background: linear-gradient(135deg, #f0f9ff 0%, #faf5ff 100%);
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 24px;
+            border-left: 4px solid #8b5cf6;
+        }}
+        .ai-summary h3 {{ font-size: 18px; margin-bottom: 16px; color: #7c3aed; display: flex; align-items: center; gap: 8px; }}
+        .ai-summary h4 {{ font-size: 15px; margin: 18px 0 10px 0; color: #6d28d9; border-bottom: 1px solid #e9d5ff; padding-bottom: 6px; }}
+        .ai-summary p {{ font-size: 16px; line-height: 2.0; color: #333; margin-bottom: 12px; }}
+        .ai-summary ul {{ padding-left: 24px; margin-bottom: 12px; }}
+        .ai-summary li {{ font-size: 16px; line-height: 2.0; color: #333; margin-bottom: 8px; }}
+        .ai-summary h3 {{ font-size: 20px; margin: 24px 0 14px 0; color: #6d28d9; border-bottom: 2px solid #ddd6fe; padding-bottom: 8px; }}
+        .ai-summary h4 {{ font-size: 18px; margin: 20px 0 12px 0; color: #7c3aed; }}
+        .ai-summary ul {{ padding-left: 20px; margin-bottom: 10px; }}
+        .ai-summary li {{ font-size: 14px; line-height: 1.8; color: #444; margin-bottom: 6px; }}
+        .ai-summary strong {{ color: #7c3aed; }}
+        .ai-badge {{ display: inline-block; background: linear-gradient(135deg, #8b5cf6, #ec4899); color: white; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }}
+        .multi-analysis {{
+            background: linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%);
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 24px;
+            border-left: 4px solid #f59e0b;
+        }}
+        .multi-analysis h3 {{ font-size: 20px; margin-bottom: 16px; color: #d97706; display: flex; align-items: center; gap: 8px; }}
+        .multi-analysis h4 {{ font-size: 18px; margin: 20px 0 12px 0; color: #b45309; border-bottom: 2px solid #fde68a; padding-bottom: 8px; }}
+        .multi-analysis p {{ font-size: 16px; line-height: 2.0; color: #333; margin-bottom: 12px; }}
+        .multi-analysis ul {{ padding-left: 24px; margin-bottom: 12px; }}
+        .multi-analysis li {{ font-size: 16px; line-height: 2.0; color: #333; margin-bottom: 8px; }}
+        .multi-analysis strong {{ color: #d97706; }}
+        .multi-badge {{ display: inline-block; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }}
     </style>
 </head>
 <body>
@@ -856,6 +1205,22 @@ def generate_html_report(question_info, answers, analysis, output_path):
                 <li>📊 回答长度分布：{length_bins.get('500-2000字', 0)}篇中等长度（500-2000字），占比 {length_bins.get('500-2000字', 0)/max(analysis.get('total',1),1)*100:.1f}%</li>
             </ul>
         </div>
+
+        <!-- AI深度总结 -->
+        {f'''
+        <div class="ai-summary">
+            <h3>🤖 AI深度总结 <span class="ai-badge">DeepSeek生成</span></h3>
+            {markdown_to_html(ai_summary)}
+        </div>
+        ''' if ai_summary else ''}
+
+        <!-- 多源融合分析 -->
+        {f'''
+        <div class="multi-analysis">
+            <h3>🧠 多源融合深度分析 <span class="multi-badge">书籍+视角+回答</span></h3>
+            {markdown_to_html(multi_analysis)}
+        </div>
+        ''' if multi_analysis else ''}
 
         <!-- 标签页 -->
         <div class="tabs">
@@ -930,21 +1295,22 @@ def generate_html_report(question_info, answers, analysis, output_path):
         if (wordFreqData.length > 0) {{
             const chart1 = echarts.init(document.getElementById('chart-wordfreq'));
             chart1.setOption({{
-                tooltip: {{ trigger: 'axis', formatter: '{{b}}: {{c}}次' }},
-                grid: {{ left: 100, right: 40, top: 20, bottom: 30 }},
-                xAxis: {{ type: 'value', name: '出现次数' }},
-                yAxis: {{ type: 'category', data: wordFreqData.map(w=>w[0]).reverse(), axisLabel: {{fontSize:11}} }},
+                tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }}, formatter: '{{b}}: {{c}}次' }},
+                grid: {{ left: 120, right: 80, top: 30, bottom: 50 }},
+                xAxis: {{ type: 'value', name: '出现次数', nameLocation: 'middle', nameGap: 30, minInterval: 1 }},
+                yAxis: {{ type: 'category', data: wordFreqData.map(w=>w[0]).reverse(), axisLabel: {{fontSize:14, interval:0, width: 110, overflow: 'truncate'}} }},
                 series: [{{
                     data: wordFreqData.map(w=>w[1]).reverse(),
                     type: 'bar',
+                    barWidth: '60%',
+                    label: {{ show: true, position: 'right', fontSize: 13 }},
                     itemStyle: {{
                         color: new echarts.graphic.LinearGradient(0,0,1,0,[
                             {{offset:0,color:'#0066ff'}},{{offset:1,color:'#00a6ff'}}
                         ]),
                         borderRadius: [0,4,4,0]
                     }}
-                }}],
-                dataZoom: [{{type:'slider',yAxisIndex:0,orient:'vertical',right:10,width:15}}]
+                }}]
             }});
         }}
 
@@ -953,13 +1319,15 @@ def generate_html_report(question_info, answers, analysis, output_path):
         if (commentWordData.length > 0) {{
             const chart2 = echarts.init(document.getElementById('chart-commentword'));
             chart2.setOption({{
-                tooltip: {{ trigger: 'axis', formatter: '{{b}}: {{c}}次' }},
-                grid: {{ left: 100, right: 40, top: 20, bottom: 30 }},
-                xAxis: {{ type: 'value', name: '出现次数' }},
-                yAxis: {{ type: 'category', data: commentWordData.map(w=>w[0]).reverse(), axisLabel: {{fontSize:11}} }},
+                tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }}, formatter: '{{b}}: {{c}}次' }},
+                grid: {{ left: 120, right: 80, top: 30, bottom: 50 }},
+                xAxis: {{ type: 'value', name: '出现次数', nameLocation: 'middle', nameGap: 30, minInterval: 1 }},
+                yAxis: {{ type: 'category', data: commentWordData.map(w=>w[0]).reverse(), axisLabel: {{fontSize:14, interval:0, width: 110, overflow: 'truncate'}} }},
                 series: [{{
                     data: commentWordData.map(w=>w[1]).reverse(),
                     type: 'bar',
+                    barWidth: '60%',
+                    label: {{ show: true, position: 'right', fontSize: 13 }},
                     itemStyle: {{
                         color: new echarts.graphic.LinearGradient(0,0,1,0,[
                             {{offset:0,color:'#ff6b6b'}},{{offset:1,color:'#ffa502'}}
@@ -974,14 +1342,15 @@ def generate_html_report(question_info, answers, analysis, output_path):
         const lengthData = {json.dumps(length_bins, ensure_ascii=False)};
         const chart3 = echarts.init(document.getElementById('chart-length'));
         chart3.setOption({{
-            tooltip: {{ trigger: 'axis', formatter: '{{b}}: {{c}}篇' }},
-            grid: {{ left: 50, right: 30, top: 30, bottom: 40 }},
-            xAxis: {{ type: 'category', data: Object.keys(lengthData) }},
-            yAxis: {{ type: 'value', name: '回答数' }},
+            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }}, formatter: '{{b}}: {{c}}篇' }},
+            grid: {{ left: 80, right: 40, top: 40, bottom: 80 }},
+            xAxis: {{ type: 'category', data: Object.keys(lengthData), axisLabel: {{fontSize:13, interval:0, rotate: 35}} }},
+            yAxis: {{ type: 'value', name: '回答数', nameLocation: 'middle', nameGap: 45, minInterval: 1 }},
             series: [{{
                 data: Object.values(lengthData),
                 type: 'bar',
-                barWidth: '50%',
+                barWidth: '55%',
+                label: {{ show: true, position: 'top', fontSize: 13 }},
                 itemStyle: {{
                     color: new echarts.graphic.LinearGradient(0,0,0,1,[
                         {{offset:0,color:'#0084ff'}},{{offset:1,color:'#00a6ff'}}
@@ -995,14 +1364,15 @@ def generate_html_report(question_info, answers, analysis, output_path):
         const voteData = {json.dumps(vote_bins, ensure_ascii=False)};
         const chart4 = echarts.init(document.getElementById('chart-vote'));
         chart4.setOption({{
-            tooltip: {{ trigger: 'axis', formatter: '{{b}}赞同: {{c}}篇' }},
-            grid: {{ left: 50, right: 30, top: 30, bottom: 40 }},
-            xAxis: {{ type: 'category', data: Object.keys(voteData) }},
-            yAxis: {{ type: 'value', name: '回答数' }},
+            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }}, formatter: '{{b}}赞同: {{c}}篇' }},
+            grid: {{ left: 80, right: 40, top: 40, bottom: 80 }},
+            xAxis: {{ type: 'category', data: Object.keys(voteData), axisLabel: {{fontSize:13, interval:0, rotate: 35}} }},
+            yAxis: {{ type: 'value', name: '回答数', nameLocation: 'middle', nameGap: 45, minInterval: 1 }},
             series: [{{
                 data: Object.values(voteData),
                 type: 'bar',
-                barWidth: '50%',
+                barWidth: '55%',
+                label: {{ show: true, position: 'top', fontSize: 13 }},
                 itemStyle: {{
                     color: new echarts.graphic.LinearGradient(0,0,0,1,[
                         {{offset:0,color:'#ffa502'}},{{offset:1,color:'#ff6b6b'}}
@@ -1016,13 +1386,15 @@ def generate_html_report(question_info, answers, analysis, output_path):
         const topVotedData = {json.dumps([[a['author'], a['voteup_count']] for a in top_voted], ensure_ascii=False)};
         const chart5 = echarts.init(document.getElementById('chart-topvoted'));
         chart5.setOption({{
-            tooltip: {{ trigger: 'axis', formatter: '{{b}}: {{c}}赞同' }},
-            grid: {{ left: 120, right: 40, top: 20, bottom: 30 }},
-            xAxis: {{ type: 'value', name: '赞同数' }},
-            yAxis: {{ type: 'category', data: topVotedData.map(d=>d[0]).reverse(), axisLabel: {{fontSize:11}} }},
+            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }}, formatter: '{{b}}: {{c}}赞同' }},
+            grid: {{ left: 150, right: 100, top: 30, bottom: 50 }},
+            xAxis: {{ type: 'value', name: '赞同数', nameLocation: 'middle', nameGap: 30, axisLabel: {{formatter: function(v){{return v >= 10000 ? (v/10000).toFixed(1)+'万' : v;}}}} }},
+            yAxis: {{ type: 'category', data: topVotedData.map(d=>d[0]).reverse(), axisLabel: {{fontSize:14, interval:0, width: 140, overflow: 'truncate'}} }},
             series: [{{
                 data: topVotedData.map(d=>d[1]).reverse(),
                 type: 'bar',
+                barWidth: '60%',
+                label: {{ show: true, position: 'right', fontSize: 13, formatter: function(p){{return p.value >= 10000 ? (p.value/10000).toFixed(1)+'万' : p.value;}} }},
                 itemStyle: {{
                     color: new echarts.graphic.LinearGradient(0,0,1,0,[
                         {{offset:0,color:'#52c41a'}},{{offset:1,color:'#95de64'}}
@@ -1058,6 +1430,12 @@ def main():
     parser.add_argument("--output", "-o", default="", help="输出HTML文件路径")
     parser.add_argument("--sort", choices=["default", "created"], default="default",
                         help="回答排序方式：default=默认（综合），created=按时间")
+    parser.add_argument("--deepseek-api-key", help="DeepSeek API Key（用于AI深度总结）")
+    parser.add_argument("--no-ai-summary", action="store_true", help="禁用AI深度总结")
+    parser.add_argument("--books", nargs="*", default=[],
+                        help="参考书籍（可选：大学突围、大学进化论、决胜大学），可指定多个")
+    parser.add_argument("--perspective", default="",
+                        help="名人视角分析（可选：张雪峰），用指定名人的思维框架点评回答")
     args = parser.parse_args()
 
     qid = extract_question_id(args.question)
@@ -1115,13 +1493,36 @@ def main():
     print("📊 分析数据...")
     analysis = analyze_answers(answers)
 
+    # 5.5 AI深度总结
+    ai_summary = None
+    if not args.no_ai_summary:
+        api_key = args.deepseek_api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+        if api_key:
+            ai_summary = deepseek_summary(api_key, question_info, answers)
+        else:
+            print("\n💡 提示：设置DeepSeek API Key可生成AI深度总结")
+            print("   方式1：--deepseek-api-key 你的key")
+            print("   方式2：设置环境变量 DEEPSEEK_API_KEY")
+            print("   方式3：--no-ai-summary 禁用此提示")
+
+    # 5.6 多源知识融合分析（书籍+名人视角）
+    multi_analysis = None
+    if (args.books or args.perspective) and args.deepseek_api_key:
+        api_key = args.deepseek_api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+        knowledge_text = load_knowledge(books=args.books, perspective=args.perspective)
+        if knowledge_text:
+            multi_analysis = multi_source_analysis(
+                api_key, question_info, answers, knowledge_text, perspective=args.perspective
+            )
+
     # 6. 生成报告
     date_str = datetime.now().strftime("%Y-%m-%d")
     task_dir = f"output/{date_str}_question_{qid}"
     os.makedirs(task_dir, exist_ok=True)
     output_path = args.output or f"{task_dir}/report.html"
     print(f"\n📝 生成HTML报告...")
-    generate_html_report(question_info, answers, analysis, output_path)
+    generate_html_report(question_info, answers, analysis, output_path,
+                         ai_summary=ai_summary, multi_analysis=multi_analysis)
 
     print(f"\n🎉 分析完成！报告已保存至: {output_path}")
     print(f"   爬取回答: {len(answers)} 条")
